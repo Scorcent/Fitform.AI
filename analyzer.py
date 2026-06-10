@@ -21,6 +21,8 @@ Accuracy notes (why results are trustworthy):
 import base64
 import os
 import math
+import shutil
+import subprocess
 import urllib.request
 
 import cv2
@@ -465,6 +467,24 @@ def generate_annotated_video(video_path: str, exercise: str,
     finally:
         cap.release()
         writer.release()
+
+    # Re-encode to H.264 so all browsers can play it
+    if shutil.which("ffmpeg"):
+        h264_path = out_path + ".h264.mp4"
+        try:
+            proc = subprocess.run(
+                ["ffmpeg", "-y", "-i", out_path,
+                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                 "-movflags", "+faststart", "-an", h264_path],
+                capture_output=True, timeout=120,
+            )
+            if proc.returncode == 0 and os.path.getsize(h264_path) > 0:
+                os.remove(out_path)
+                out_path = h264_path
+            else:
+                print(f"[visual] ffmpeg failed: {proc.stderr.decode()[:200]}")
+        except Exception as exc:
+            print(f"[visual] ffmpeg exception: {exc}")
 
     try:
         with open(out_path, "rb") as fh:

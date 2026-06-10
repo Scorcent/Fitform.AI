@@ -42,6 +42,11 @@ const T = {
         visual_title: "Visual Analysis",
         chart_label: "Angle Over Time",
         metric_target: "target",
+        // Angle labels (from backend ANGLE_CONFIG)
+        angle_elbow: "Elbow",
+        angle_body_line: "Body Line",
+        angle_knee: "Knee",
+        angle_torso_lean: "Torso Lean",
         // Errors
         err_no_file: "Please select a video file first.",
         err_generic: "Something went wrong.",
@@ -86,6 +91,11 @@ const T = {
         visual_title: "Análisis Visual",
         chart_label: "Ángulo en el Tiempo",
         metric_target: "objetivo",
+        // Angle labels
+        angle_elbow: "Codo",
+        angle_body_line: "Línea Corporal",
+        angle_knee: "Rodilla",
+        angle_torso_lean: "Inclinación del Torso",
     }
 };
 
@@ -298,11 +308,24 @@ function displayResults(data) {
     resultsDiv.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// Map backend English label strings to translation keys
+const ANGLE_LABEL_KEYS = {
+    "Elbow":      "angle_elbow",
+    "Body Line":  "angle_body_line",
+    "Knee":       "angle_knee",
+    "Torso Lean": "angle_torso_lean",
+};
+function tlabel(label) {
+    const key = ANGLE_LABEL_KEYS[label];
+    return key ? t(key) : label;
+}
+
 // ── Visual Analysis ──
 function renderVisualAnalysis(data) {
-    const section = document.getElementById("visual-section");
-    const video   = document.getElementById("annotated-video");
-    const metrics = document.getElementById("angle-metrics");
+    const section      = document.getElementById("visual-section");
+    const video        = document.getElementById("annotated-video");
+    const videoWrapper = document.querySelector(".visual-video-wrapper");
+    const metrics      = document.getElementById("angle-metrics");
 
     // Reset
     video.removeAttribute("src");
@@ -314,7 +337,10 @@ function renderVisualAnalysis(data) {
     if (data.annotated_video) {
         video.src = "data:video/mp4;base64," + data.annotated_video;
         video.load();
+        videoWrapper.style.display = "";
         hasContent = true;
+    } else {
+        videoWrapper.style.display = "none";
     }
 
     // Angle metrics summary cards
@@ -328,7 +354,7 @@ function renderVisualAnalysis(data) {
                 ? (tl.primary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
                 : null;
             const good = best !== null && (tl.primary_dir === "max" ? best <= tl.primary_threshold : best >= tl.primary_threshold);
-            cards.push({ label: tl.primary_label, value: best, threshold: tl.primary_threshold, dir: tl.primary_dir, good });
+            cards.push({ label: tlabel(tl.primary_label), value: best, threshold: tl.primary_threshold, dir: tl.primary_dir, good });
         }
         if (tl.secondary_label && tl.secondary_threshold != null) {
             const vals = (tl.secondary || []).filter(v => v !== null);
@@ -336,7 +362,7 @@ function renderVisualAnalysis(data) {
                 ? (tl.secondary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
                 : null;
             const good = best !== null && (tl.secondary_dir === "max" ? best <= tl.secondary_threshold : best >= tl.secondary_threshold);
-            cards.push({ label: tl.secondary_label, value: best, threshold: tl.secondary_threshold, dir: tl.secondary_dir, good });
+            cards.push({ label: tlabel(tl.secondary_label), value: best, threshold: tl.secondary_threshold, dir: tl.secondary_dir, good });
         }
 
         cards.forEach(card => {
@@ -370,30 +396,30 @@ function drawAngleChart(tl) {
     const canvas = document.getElementById("angle-chart");
     const ctx    = canvas.getContext("2d");
 
-    // Fit canvas to container width
     canvas.width  = canvas.parentElement.clientWidth || 600;
-    canvas.height = 240;
+    canvas.height = 260;
 
     const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-    const bgColor      = isDark ? "#131c2e" : "#f4f7fc";
-    const gridColor    = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)";
-    const axisColor    = isDark ? "#9ab0ce" : "#5b6b82";
-    const textColor    = isDark ? "#c8d8f0" : "#0f1b2d";
-    const threshColor  = "rgba(150,150,150,0.7)";
+    const bgColor     = isDark ? "#131c2e" : "#f4f7fc";
+    const gridColor   = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)";
+    const axisColor   = isDark ? "#9ab0ce" : "#5b6b82";
+    const textColor   = isDark ? "#c8d8f0" : "#0f1b2d";
+    const threshColor = isDark ? "rgba(200,200,200,0.35)" : "rgba(80,80,80,0.3)";
 
     const frames    = tl.frames;
     const primary   = tl.primary   || [];
-    const secondary = tl.secondary || [];
+    const secondary = (tl.secondary || []).filter(v => v != null).length > 0 ? (tl.secondary || []) : [];
 
     const allVals = [...primary, ...secondary].filter(v => v != null);
     if (!allVals.length) return;
 
-    const minV  = Math.max(0,   Math.min(...allVals) - 15);
-    const maxV  = Math.min(185, Math.max(...allVals) + 15);
-    const minF  = frames[0]  ?? 0;
-    const maxF  = frames[frames.length - 1] ?? 1;
+    const minV = Math.max(0,   Math.min(...allVals) - 15);
+    const maxV = Math.min(185, Math.max(...allVals) + 15);
+    const minF = frames[0]  ?? 0;
+    const maxF = frames[frames.length - 1] ?? 1;
 
-    const pL = 46, pR = 16, pT = 22, pB = 36;
+    // More bottom padding to hold legend below x-axis ticks
+    const pL = 46, pR = 16, pT = 14, pB = 50;
     const cW = canvas.width  - pL - pR;
     const cH = canvas.height - pT - pB;
 
@@ -405,38 +431,38 @@ function drawAngleChart(tl) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Horizontal grid + Y labels
-    const step = maxV - minV > 60 ? 20 : 10;
-    ctx.font = "11px Inter, sans-serif";
-    ctx.textAlign = "right";
-    for (let v = Math.ceil(minV / step) * step; v <= maxV; v += step) {
+    const yStep = (maxV - minV) > 60 ? 20 : 10;
+    for (let v = Math.ceil(minV / yStep) * yStep; v <= maxV; v += yStep) {
         const y = toY(v);
         ctx.strokeStyle = gridColor;
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + cW, y); ctx.stroke();
         ctx.fillStyle = axisColor;
+        ctx.font = "11px Inter, sans-serif";
+        ctx.textAlign = "right";
         ctx.fillText(v + "°", pL - 4, y + 4);
     }
 
-    // Threshold lines
+    // Threshold lines — dashed, labeled at the right edge (no overlap with data)
     function drawThreshold(val, dir) {
         if (val == null) return;
         const y = toY(val);
         ctx.save();
         ctx.strokeStyle = threshColor;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + cW, y); ctx.stroke();
         ctx.setLineDash([]);
+        ctx.font = "9px Inter, sans-serif";
+        ctx.textAlign = "right";
         ctx.fillStyle = threshColor;
-        ctx.font = "10px Inter, sans-serif";
-        ctx.textAlign = "left";
-        ctx.fillText((dir === "max" ? "≤" : "≥") + val + "° " + t("metric_target"), pL + 4, y - 3);
+        ctx.fillText((dir === "max" ? "≤" : "≥") + val + "°", pL + cW - 2, y - 2);
         ctx.restore();
     }
     drawThreshold(tl.primary_threshold,   tl.primary_dir);
     drawThreshold(tl.secondary_threshold, tl.secondary_dir);
 
-    // Draw a data series
+    // Data lines
     function drawLine(values, color) {
         if (!values || !values.length) return;
         ctx.strokeStyle = color;
@@ -453,27 +479,38 @@ function drawAngleChart(tl) {
         });
         ctx.stroke();
     }
-
     drawLine(primary,   "#4f7ef8");
     drawLine(secondary, "#f87f4f");
 
-    // X-axis label
+    // X-axis: evenly spaced frame-number ticks
+    const tickCount = Math.min(6, frames.length);
+    ctx.font = "10px Inter, sans-serif";
     ctx.fillStyle = axisColor;
-    ctx.font = "11px Inter, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Frame", pL + cW / 2, canvas.height - 6);
+    for (let i = 0; i < tickCount; i++) {
+        const idx = Math.round(i * (frames.length - 1) / Math.max(1, tickCount - 1));
+        const f   = frames[idx] ?? 0;
+        const x   = Math.round(toX(f));
+        ctx.fillStyle = axisColor;
+        ctx.fillRect(x, pT + cH, 1, 4);
+        ctx.fillText(String(f), x, pT + cH + 14);
+    }
 
-    // Legend
+    // Legend — centered below the x-axis ticks
+    const legendItems = [[tlabel(tl.primary_label), "#4f7ef8"]];
+    if (secondary.length) legendItems.push([tlabel(tl.secondary_label), "#f87f4f"]);
+    const itemSpacing = 120;
+    const legendTotalW = legendItems.length * itemSpacing - (itemSpacing - 80);
+    let lx = pL + cW / 2 - legendTotalW / 2;
+    const legendY = canvas.height - 8;
+    ctx.font = "11px Inter, sans-serif";
     ctx.textAlign = "left";
-    const legendItems = [[tl.primary_label, "#4f7ef8"]];
-    if (secondary.length) legendItems.push([tl.secondary_label, "#f87f4f"]);
-    legendItems.forEach(([label, color], i) => {
-        const lx = pL + 6, ly = pT + 6 + i * 16;
+    legendItems.forEach(([label, color]) => {
         ctx.fillStyle = color;
-        ctx.fillRect(lx, ly, 14, 3);
+        ctx.fillRect(lx, legendY - 5, 14, 3);
         ctx.fillStyle = textColor;
-        ctx.font = "11px Inter, sans-serif";
-        ctx.fillText(label, lx + 18, ly + 5);
+        ctx.fillText(label, lx + 18, legendY);
+        lx += itemSpacing;
     });
 }
 
