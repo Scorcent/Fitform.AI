@@ -18,6 +18,7 @@ Accuracy notes (why results are trustworthy):
     so a static or unrelated video is not graded as "great".
 """
 
+import base64
 import os
 import math
 import urllib.request
@@ -64,6 +65,46 @@ NEEDED_JOINTS = {
     "plank":  ["shoulder", "hip", "ankle"],
     "lunge":  ["shoulder", "hip", "knee", "ankle"],
 }
+
+# Joint pairs to draw as skeleton lines in the annotated video
+SKELETON_CONNECTIONS = {
+    "pushup": [("shoulder","elbow"),("elbow","wrist"),("shoulder","hip"),("hip","ankle")],
+    "squat":  [("shoulder","hip"),("hip","knee"),("knee","ankle")],
+    "plank":  [("shoulder","hip"),("hip","ankle")],
+    "lunge":  [("shoulder","hip"),("hip","knee"),("knee","ankle")],
+}
+
+# Per-exercise angle display configuration for the video overlay and chart
+ANGLE_CONFIG = {
+    "pushup": {
+        "primary_joint": "elbow",   "primary_label": "Elbow",
+        "primary_threshold": 95.0,  "primary_dir": "max",
+        "secondary_joint": "hip",   "secondary_label": "Body Line",
+        "secondary_threshold": 160.0, "secondary_dir": "min",
+    },
+    "squat": {
+        "primary_joint": "knee",    "primary_label": "Knee",
+        "primary_threshold": 100.0, "primary_dir": "max",
+        "secondary_joint": "shoulder", "secondary_label": "Torso Lean",
+        "secondary_threshold": 50.0,   "secondary_dir": "max",
+    },
+    "plank": {
+        "primary_joint": "hip",     "primary_label": "Body Line",
+        "primary_threshold": 160.0, "primary_dir": "min",
+    },
+    "lunge": {
+        "primary_joint": "knee",    "primary_label": "Knee",
+        "primary_threshold": 110.0, "primary_dir": "max",
+        "secondary_joint": "shoulder", "secondary_label": "Torso Lean",
+        "secondary_threshold": 30.0,   "secondary_dir": "max",
+    },
+}
+
+# Drawing colors (BGR)
+_SKEL_COLOR  = (100, 220, 255)  # warm yellow-ish
+_JOINT_COLOR = (255, 255, 255)
+_GOOD_COLOR  = (50,  200,  50)  # green
+_BAD_COLOR   = (50,   50, 220)  # red
 
 
 # ══════════════════════════════════════════════
@@ -171,13 +212,14 @@ def _m(language: str, exercise: str, key: str) -> str:
 # ──────────────────────────────────────────────
 # Extract body landmarks from every frame
 # ──────────────────────────────────────────────
-def extract_landmarks(video_path: str) -> list[dict]:
+def extract_landmarks(video_path: str):
     """
-    Run MediaPipe Pose on each frame and return a list of per-frame records.
+    Run MediaPipe Pose on each frame and return (frames, fps).
 
-    Each record looks like:
+    Each frame record:
         {"left":  {"shoulder": (x, y, vis), ...},
-         "right": {"shoulder": (x, y, vis), ...}}
+         "right": {"shoulder": (x, y, vis), ...},
+         "frame_idx": int}   ← original frame number in the video
     """
     ensure_model()
 
@@ -187,7 +229,7 @@ def extract_landmarks(video_path: str) -> list[dict]:
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps <= 0:
-        fps = 30
+        fps = 30.0
 
     base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
     options = vision.PoseLandmarkerOptions(
@@ -214,7 +256,7 @@ def extract_landmarks(video_path: str) -> list[dict]:
             if result.pose_landmarks and len(result.pose_landmarks) > 0:
                 h, w, _ = frame.shape
                 landmarks = result.pose_landmarks[0]
-                record = {}
+                record = {"frame_idx": frame_idx}
                 for side, joints in SIDES.items():
                     record[side] = {}
                     for name, idx in joints.items():
@@ -226,7 +268,7 @@ def extract_landmarks(video_path: str) -> list[dict]:
             frame_idx += 1
 
     cap.release()
-    return all_frames
+    return all_frames, float(fps)
 
 
 # ──────────────────────────────────────────────
@@ -247,12 +289,15 @@ def _clean_frames(frames, side, needed) -> list[dict]:
     """
     Keep only frames where every needed joint on the chosen side is visible
     enough, and return them as plain {name: (x, y)} dictionaries.
+    The special key "__frame_idx" carries the original video frame number.
     """
     clean = []
     for rec in frames:
         joints = rec[side]
         if all(joints[j][2] >= MIN_VISIBILITY for j in needed):
-            clean.append({j: (joints[j][0], joints[j][1]) for j in needed})
+            d = {j: (joints[j][0], joints[j][1]) for j in needed}
+            d["__frame_idx"] = rec.get("frame_idx", len(clean))
+            clean.append(d)
     return clean
 
 
@@ -309,6 +354,159 @@ def _series(clean, fn):
     return np.array([fn(lm) for lm in clean], dtype=float)
 
 
+# ══════════════════════════════════════════════
+# Visual overlay helpers
+# ══════════════════════════════════════════════
+def _draw_angle_label(img, pos, text, is_good, dx=12, dy=-14):
+    """Draw angle text with a solid dark background for readability."""
+    color = _GOOD_COLOR if is_good else _BAD_COLOR
+    tx, ty = pos[0] + dx, pos[1] + dy
+    font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2
+    (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
+    pad = 3
+    cv2.rectangle(img,
+                  (tx - pad, ty - th - pad),
+                  (tx + tw + pad, ty + base + pad),
+                  (0, 0, 0), cv2.FILLED)
+    cv2.putText(img, text, (tx, ty), font, scale, color, thickness, cv2.LINE_AA)
+
+
+def _draw_frame_overlay(frame, joints, exercise, angle_data):
+    """Return a copy of frame with skeleton lines, joint dots, and angle labels."""
+    out = frame.copy()
+    for j1, j2 in SKELETON_CONNECTIONS.get(exercise, []):
+        if j1 in joints and j2 in joints:
+            cv2.line(out, joints[j1], joints[j2], _SKEL_COLOR, 2, cv2.LINE_AA)
+    for pos in joints.values():
+        cv2.circle(out, pos, 6, _JOINT_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(out, pos, 6, (30, 30, 30), 1, cv2.LINE_AA)
+
+    cfg = ANGLE_CONFIG.get(exercise, {})
+
+    p_val = angle_data.get("primary")
+    if p_val is not None:
+        pj   = cfg.get("primary_joint")
+        pt   = cfg.get("primary_threshold", 90)
+        pdir = cfg.get("primary_dir", "max")
+        good = (p_val <= pt) if pdir == "max" else (p_val >= pt)
+        if pj in joints:
+            _draw_angle_label(out, joints[pj], f"{p_val:.0f}\xb0", good, dx=10, dy=-14)
+
+    s_val = angle_data.get("secondary")
+    if s_val is not None:
+        sj   = cfg.get("secondary_joint")
+        st   = cfg.get("secondary_threshold", 50)
+        sdir = cfg.get("secondary_dir", "max")
+        good = (s_val <= st) if sdir == "max" else (s_val >= st)
+        if sj in joints:
+            _draw_angle_label(out, joints[sj], f"{s_val:.0f}\xb0", good, dx=10, dy=22)
+
+    return out
+
+
+def generate_annotated_video(video_path: str, exercise: str,
+                             clean: list, angle_series: list) -> str:
+    """
+    Re-reads the source video, draws skeleton + angle overlays on frames that
+    have landmark data, and returns the result as a base64-encoded MP4 string.
+    """
+    joints_by_frame = {}
+    for lm in clean:
+        fi = lm.get("__frame_idx")
+        if fi is not None:
+            joints_by_frame[fi] = {k: v for k, v in lm.items() if k != "__frame_idx"}
+
+    angles_by_frame = {item["frame_idx"]: item for item in angle_series}
+
+    cap = cv2.VideoCapture(video_path)
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    orig_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    scale = min(1.0, 640.0 / orig_w) if orig_w > 0 else 1.0
+    out_w = max(2, int(orig_w * scale) & ~1)
+    out_h = max(2, int(orig_h * scale) & ~1)
+    out_fps = min(orig_fps, 20.0)
+    frame_step = max(1, round(orig_fps / out_fps))
+
+    out_path = video_path + "_annotated.mp4"
+
+    # Try codecs in order; avc1 (H.264) plays best in browsers, mp4v as fallback
+    writer = None
+    for fourcc_str in ("avc1", "mp4v"):
+        fourcc = cv2.VideoWriter_fourcc(*fourcc_str)
+        writer = cv2.VideoWriter(out_path, fourcc, out_fps, (out_w, out_h))
+        if writer.isOpened():
+            break
+    if writer is None or not writer.isOpened():
+        cap.release()
+        raise RuntimeError("No usable video codec found (tried avc1, mp4v)")
+
+    try:
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % frame_step == 0:
+                if scale < 1.0:
+                    frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                if frame_idx in joints_by_frame:
+                    scaled_joints = {
+                        j: (int(x * scale), int(y * scale))
+                        for j, (x, y) in joints_by_frame[frame_idx].items()
+                    }
+                    frame = _draw_frame_overlay(
+                        frame, scaled_joints, exercise,
+                        angles_by_frame.get(frame_idx, {})
+                    )
+                writer.write(frame)
+            frame_idx += 1
+    finally:
+        cap.release()
+        writer.release()
+
+    try:
+        with open(out_path, "rb") as fh:
+            raw = fh.read()
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+
+    # Skip sending video if it's too large (>8 MB base64 ≈ 6 MB raw)
+    if len(raw) > 6 * 1024 * 1024:
+        print(f"[visual] video too large ({len(raw)//1024} KB), skipping video embed")
+        return ""
+
+    return base64.b64encode(raw).decode("utf-8")
+
+
+def _build_angle_timeline(angle_series: list, exercise: str) -> dict:
+    """Return chart-ready angle timeline data for the frontend."""
+    cfg = ANGLE_CONFIG.get(exercise, {})
+    frames    = [item["frame_idx"] for item in angle_series]
+    primary   = [item.get("primary")   for item in angle_series]
+    secondary = [item.get("secondary") for item in angle_series]
+
+    timeline = {
+        "frames":            frames,
+        "primary":           primary,
+        "primary_label":     cfg.get("primary_label", "Angle"),
+        "primary_threshold": cfg.get("primary_threshold"),
+        "primary_dir":       cfg.get("primary_dir", "max"),
+    }
+    if any(s is not None for s in secondary):
+        timeline.update({
+            "secondary":           secondary,
+            "secondary_label":     cfg.get("secondary_label", "Angle 2"),
+            "secondary_threshold": cfg.get("secondary_threshold"),
+            "secondary_dir":       cfg.get("secondary_dir", "max"),
+        })
+    return timeline
+
+
 # ──────────────────────────────────────────────
 # Main analysis dispatcher
 # ──────────────────────────────────────────────
@@ -320,7 +518,7 @@ def analyze(video_path: str, exercise: str, language: str = "en") -> dict:
     if language not in MSG:
         language = "en"
 
-    frames = extract_landmarks(video_path)
+    frames, _fps = extract_landmarks(video_path)
 
     if not frames:
         return _unknown(exercise, language, MSG[language]["no_pose"])
@@ -339,6 +537,17 @@ def analyze(video_path: str, exercise: str, language: str = "en") -> dict:
     analyzer_fn = analyzers.get(exercise, _analyze_pushup)
     result = analyzer_fn(clean, exercise, language)
     result["side_used"] = side
+
+    angle_series = result.pop("_angle_series", None)
+    if angle_series:
+        try:
+            result["annotated_video"] = generate_annotated_video(
+                video_path, exercise, clean, angle_series
+            )
+            result["angle_timeline"] = _build_angle_timeline(angle_series, exercise)
+        except Exception as exc:
+            print(f"[visual] annotation skipped: {exc}")
+
     return result
 
 
@@ -387,6 +596,11 @@ def _analyze_pushup(clean, exercise, language) -> dict:
         res = _unknown(exercise, language, _m(language, "pushup", "norep"), len(clean))
         res["min_elbow_angle"] = round(bottom_elbow, 1)
         res["avg_body_alignment"] = round(body_align, 1)
+        fi = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
+        res["_angle_series"] = [
+            {"frame_idx": int(fi[i]), "primary": float(elbow[i]), "secondary": float(body[i])}
+            for i in range(len(clean))
+        ]
         return res
 
     depth_good = bottom_elbow <= PU_DEPTH_MAX
@@ -399,6 +613,7 @@ def _analyze_pushup(clean, exercise, language) -> dict:
     overall = _verdict(sum([depth_good, align_good]), 2)
     summary = _m(language, "pushup", {"great": "great", "okay": "okay", "needs work": "needs"}[overall])
 
+    frame_indices = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
     return {
         "exercise": exercise,
         "overall": overall,
@@ -408,6 +623,10 @@ def _analyze_pushup(clean, exercise, language) -> dict:
         "frames_analyzed": len(clean),
         "min_elbow_angle": round(bottom_elbow, 1),
         "avg_body_alignment": round(body_align, 1),
+        "_angle_series": [
+            {"frame_idx": int(frame_indices[i]), "primary": float(elbow[i]), "secondary": float(body[i])}
+            for i in range(len(clean))
+        ],
     }
 
 
@@ -432,7 +651,13 @@ def _analyze_squat(clean, exercise, language) -> dict:
 
     did_rep = knee_rom >= SQ_MIN_ROM
     if not did_rep:
-        return _unknown(exercise, language, _m(language, "squat", "norep"), len(clean))
+        res = _unknown(exercise, language, _m(language, "squat", "norep"), len(clean))
+        fi = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
+        res["_angle_series"] = [
+            {"frame_idx": int(fi[i]), "primary": float(knee[i]), "secondary": float(lean[i])}
+            for i in range(len(clean))
+        ]
+        return res
 
     depth_good = bottom_knee <= SQ_DEPTH_MAX
     back_good = avg_lean <= SQ_LEAN_MAX
@@ -444,6 +669,7 @@ def _analyze_squat(clean, exercise, language) -> dict:
     overall = _verdict(sum([depth_good, back_good]), 2)
     summary = _m(language, "squat", {"great": "great", "okay": "okay", "needs work": "needs"}[overall])
 
+    frame_indices = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
     return {
         "exercise": exercise,
         "overall": overall,
@@ -453,6 +679,10 @@ def _analyze_squat(clean, exercise, language) -> dict:
         "frames_analyzed": len(clean),
         "min_knee_angle": round(bottom_knee, 1),
         "avg_torso_lean": round(avg_lean, 1),
+        "_angle_series": [
+            {"frame_idx": int(frame_indices[i]), "primary": float(knee[i]), "secondary": float(lean[i])}
+            for i in range(len(clean))
+        ],
     }
 
 
@@ -488,6 +718,7 @@ def _analyze_plank(clean, exercise, language) -> dict:
     overall = _verdict(sum([align_good, stable_good]), 2)
     summary = _m(language, "plank", {"great": "great", "okay": "okay", "needs work": "needs"}[overall])
 
+    frame_indices = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
     return {
         "exercise": exercise,
         "overall": overall,
@@ -496,6 +727,10 @@ def _analyze_plank(clean, exercise, language) -> dict:
         "summary": summary,
         "frames_analyzed": len(clean),
         "avg_body_alignment": round(body_align, 1),
+        "_angle_series": [
+            {"frame_idx": int(frame_indices[i]), "primary": float(body[i])}
+            for i in range(len(clean))
+        ],
     }
 
 
@@ -519,7 +754,13 @@ def _analyze_lunge(clean, exercise, language) -> dict:
 
     did_rep = knee_rom >= LU_MIN_ROM
     if not did_rep:
-        return _unknown(exercise, language, _m(language, "lunge", "norep"), len(clean))
+        res = _unknown(exercise, language, _m(language, "lunge", "norep"), len(clean))
+        fi = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
+        res["_angle_series"] = [
+            {"frame_idx": int(fi[i]), "primary": float(knee[i]), "secondary": float(lean[i])}
+            for i in range(len(clean))
+        ]
+        return res
 
     depth_good = bottom_knee <= LU_DEPTH_MAX
     torso_good = avg_lean <= LU_LEAN_MAX
@@ -531,6 +772,7 @@ def _analyze_lunge(clean, exercise, language) -> dict:
     overall = _verdict(sum([depth_good, torso_good]), 2)
     summary = _m(language, "lunge", {"great": "great", "okay": "okay", "needs work": "needs"}[overall])
 
+    frame_indices = [lm.get("__frame_idx", i) for i, lm in enumerate(clean)]
     return {
         "exercise": exercise,
         "overall": overall,
@@ -540,4 +782,8 @@ def _analyze_lunge(clean, exercise, language) -> dict:
         "frames_analyzed": len(clean),
         "min_knee_angle": round(bottom_knee, 1),
         "avg_torso_lean": round(avg_lean, 1),
+        "_angle_series": [
+            {"frame_idx": int(frame_indices[i]), "primary": float(knee[i]), "secondary": float(lean[i])}
+            for i in range(len(clean))
+        ],
     }

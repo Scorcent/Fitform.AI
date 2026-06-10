@@ -799,3 +799,110 @@ h1, h2, h3, .logo-word, .hero-title {
         text-align: center;
     }
 }
+
+/* ════════════════════════════════════════════
+   Visual Analysis section
+   ════════════════════════════════════════════ */
+.visual-card {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.visual-card h3 {
+    margin-bottom: 0;
+}
+
+/* Annotated video */
+.visual-video-wrapper {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    line-height: 0;
+}
+
+#annotated-video {
+    width: 100%;
+    max-height: 380px;
+    display: block;
+    object-fit: contain;
+    background: #000;
+}
+
+/* Metric summary cards */
+.angle-metrics {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.angle-metric-card {
+    flex: 1 1 140px;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1.5px solid var(--border);
+}
+
+.angle-metric-card.metric-good {
+    background: color-mix(in srgb, var(--green) 10%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--green) 35%, transparent);
+}
+
+.angle-metric-card.metric-bad {
+    background: color-mix(in srgb, var(--red) 10%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--red) 35%, transparent);
+}
+
+.metric-badge {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.metric-good .metric-badge { color: var(--green); }
+.metric-bad  .metric-badge { color: var(--red);   }
+
+.metric-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: "Space Grotesk", sans-serif;
+    color: var(--text);
+}
+
+.metric-target {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Angle timeline chart */
+.chart-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chart-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+#angle-chart {
+    width: 100%;
+    border-radius: 10px;
+    display: block;
+}
+

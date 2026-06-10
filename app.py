@@ -327,6 +327,10 @@ def upload():
     except OSError:
         pass
 
+    vis_keys = [k for k in ("annotated_video", "angle_timeline") if k in result]
+    av_size = len(result["annotated_video"]) if "annotated_video" in result else 0
+    print(f"[upload] overall={result.get('overall')} visual={vis_keys} video_b64={av_size//1024}KB")
+
     return jsonify(result)
 
 

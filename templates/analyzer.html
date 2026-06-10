@@ -130,6 +130,22 @@
                         <h3 data-i18n="coach_title">Coach's Notes</h3>
                         <p id="result-feedback"></p>
                     </div>
+
+                    <!-- Visual Analysis -->
+                    <div id="visual-section" class="feedback-card visual-card hidden">
+                        <h3 data-i18n="visual_title">Visual Analysis</h3>
+
+                        <div class="visual-video-wrapper">
+                            <video id="annotated-video" controls playsinline muted></video>
+                        </div>
+
+                        <div class="angle-metrics" id="angle-metrics"></div>
+
+                        <div class="chart-wrapper">
+                            <p class="chart-label" data-i18n="chart_label">Angle Over Time</p>
+                            <canvas id="angle-chart"></canvas>
+                        </div>
+                    </div>
                 </section>
             </section>
 
