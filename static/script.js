@@ -56,14 +56,14 @@ const T = {
         no_response: "No response.",
     },
     es: {
-        lang_en: "Ingles",
-        lang_es: "Espanol",
+        lang_en: "Inglés",
+        lang_es: "Español",
         tab_analyze: "Analizar",
-        tab_coach: "Chat con Entrenador",
-        logout: "Cerrar Sesion",
+        tab_coach: "Chat con el Entrenador",
+        logout: "Cerrar Sesión",
         analyze_title: "Analiza Tu Forma",
         analyze_subtitle: "Elige un ejercicio, sube tu video y recibe comentarios al instante.",
-        ex_pushup: "Flexion",
+        ex_pushup: "Flexión",
         ex_squat: "Sentadilla",
         ex_plank: "Plancha",
         ex_lunge: "Zancada",
@@ -71,27 +71,25 @@ const T = {
         analyze_btn: "Analizar Mi Forma",
         loading: "Analizando tu forma...",
         strengths_title: "Lo que hiciste bien",
-        tips_title: "Como mejorar",
+        tips_title: "Cómo mejorar",
         coach_title: "Notas del Entrenador",
         chat_title: "Pregunta a Tu Entrenador IA",
-        chat_subtitle: "Pregunta lo que quieras sobre tu forma, tecnica o entrenamiento.",
-        chat_placeholder: "Ej. Como puedo mejorar la profundidad de mis flexiones?",
+        chat_subtitle: "Pregunta lo que quieras sobre tu forma, técnica o entrenamiento.",
+        chat_placeholder: "Ej. ¿Cómo puedo mejorar la profundidad de mis flexiones?",
         send: "Enviar",
-        rating_great: "Excelente Forma!",
-        rating_okay: "Casi Perfecto!",
-        rating_needs_work: "Sigue Practicando!",
+        rating_great: "¡Excelente Forma!",
+        rating_okay: "¡Casi Perfecto!",
+        rating_needs_work: "¡Sigue Practicando!",
         rating_unknown: "No Se Pudo Analizar",
         err_no_file: "Por favor selecciona un archivo de video primero.",
-        err_generic: "Algo salio mal.",
-        err_server: "No se pudo conectar al servidor. Esta ejecutandose?",
+        err_generic: "Algo salió mal.",
+        err_server: "No se pudo conectar al servidor. ¿Está ejecutándose?",
         err_chat: "No se pudo conectar al servidor.",
         no_feedback: "Sube un video para recibir comentarios personalizados.",
         no_response: "Sin respuesta.",
-        // Visual analysis
         visual_title: "Análisis Visual",
         chart_label: "Ángulo en el Tiempo",
         metric_target: "objetivo",
-        // Angle labels
         angle_elbow: "Codo",
         angle_body_line: "Línea Corporal",
         angle_knee: "Rodilla",
@@ -120,9 +118,24 @@ function setLang(lang) {
         if (tr[key]) el.placeholder = tr[key];
     });
 
-    // Keep the file label in sync if no file is selected yet
+    // Keep the file label in sync only when no file is selected
     if (fileInput && fileInput.files.length === 0) {
         fileLabel.textContent = tr.file_prompt;
+    }
+
+    // Re-translate dynamic result content if results are currently visible
+    if (lastData && resultsDiv && !resultsDiv.classList.contains("hidden")) {
+        const ratingLabel = document.getElementById("rating-label");
+        const ratingKeys = { "great": "rating_great", "okay": "rating_okay", "needs work": "rating_needs_work" };
+        const ratingKey = ratingKeys[lastData.overall];
+        if (ratingLabel) ratingLabel.textContent = ratingKey ? t(ratingKey) : t("rating_unknown");
+
+        if (lastData.angle_timeline) {
+            renderAngleMetrics(lastData.angle_timeline);
+            if ((lastData.angle_timeline.primary || []).length > 1) {
+                requestAnimationFrame(() => drawAngleChart(lastData.angle_timeline));
+            }
+        }
     }
 }
 
@@ -175,6 +188,7 @@ const chatBtn      = document.getElementById("chat-btn");
 const chatMessages = document.getElementById("chat-messages");
 
 let analysisContext = {};
+let lastData = null;
 
 // ── File selection: enable the button only when a real file is chosen ──
 fileInput.addEventListener("change", () => {
@@ -238,6 +252,7 @@ form.addEventListener("submit", async (event) => {
 
 // ── Display results ──
 function displayResults(data) {
+    lastData = data;
     analysisContext = {
         exercise: data.exercise,
         overall: data.overall,
@@ -308,6 +323,45 @@ function displayResults(data) {
     resultsDiv.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ── Render translated angle metric cards into #angle-metrics ──
+function renderAngleMetrics(tl) {
+    const metrics = document.getElementById("angle-metrics");
+    metrics.innerHTML = "";
+    const cards = [];
+
+    if (tl.primary_label && tl.primary_threshold != null) {
+        const vals = (tl.primary || []).filter(v => v !== null);
+        const best = vals.length
+            ? (tl.primary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
+            : null;
+        const good = best !== null && (tl.primary_dir === "max" ? best <= tl.primary_threshold : best >= tl.primary_threshold);
+        cards.push({ label: tlabel(tl.primary_label), value: best, threshold: tl.primary_threshold, dir: tl.primary_dir, good });
+    }
+    if (tl.secondary_label && tl.secondary_threshold != null) {
+        const vals = (tl.secondary || []).filter(v => v !== null);
+        const best = vals.length
+            ? (tl.secondary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
+            : null;
+        const good = best !== null && (tl.secondary_dir === "max" ? best <= tl.secondary_threshold : best >= tl.secondary_threshold);
+        cards.push({ label: tlabel(tl.secondary_label), value: best, threshold: tl.secondary_threshold, dir: tl.secondary_dir, good });
+    }
+
+    cards.forEach(card => {
+        const div = document.createElement("div");
+        div.className = "angle-metric-card " + (card.good ? "metric-good" : "metric-bad");
+        const arrow = card.dir === "max" ? "≤" : "≥";
+        const badge = card.good ? "✓" : "✗";
+        div.innerHTML = `
+            <span class="metric-badge">${badge}</span>
+            <span class="metric-label">${card.label}</span>
+            <span class="metric-value">${card.value !== null ? card.value.toFixed(1) + "°" : "—"}</span>
+            <span class="metric-target">${t("metric_target")}: ${arrow}${card.threshold}°</span>
+        `;
+        metrics.appendChild(div);
+    });
+    return cards.length;
+}
+
 // Map backend English label strings to translation keys
 const ANGLE_LABEL_KEYS = {
     "Elbow":      "angle_elbow",
@@ -345,41 +399,7 @@ function renderVisualAnalysis(data) {
 
     // Angle metrics summary cards
     if (data.angle_timeline) {
-        const tl = data.angle_timeline;
-        const cards = [];
-
-        if (tl.primary_label && tl.primary_threshold != null) {
-            const vals = (tl.primary || []).filter(v => v !== null);
-            const best = vals.length
-                ? (tl.primary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
-                : null;
-            const good = best !== null && (tl.primary_dir === "max" ? best <= tl.primary_threshold : best >= tl.primary_threshold);
-            cards.push({ label: tlabel(tl.primary_label), value: best, threshold: tl.primary_threshold, dir: tl.primary_dir, good });
-        }
-        if (tl.secondary_label && tl.secondary_threshold != null) {
-            const vals = (tl.secondary || []).filter(v => v !== null);
-            const best = vals.length
-                ? (tl.secondary_dir === "max" ? Math.min(...vals) : Math.max(...vals))
-                : null;
-            const good = best !== null && (tl.secondary_dir === "max" ? best <= tl.secondary_threshold : best >= tl.secondary_threshold);
-            cards.push({ label: tlabel(tl.secondary_label), value: best, threshold: tl.secondary_threshold, dir: tl.secondary_dir, good });
-        }
-
-        cards.forEach(card => {
-            const div = document.createElement("div");
-            div.className = "angle-metric-card " + (card.good ? "metric-good" : "metric-bad");
-            const arrow = card.dir === "max" ? "≤" : "≥";
-            const badge = card.good ? "✓" : "✗";
-            div.innerHTML = `
-                <span class="metric-badge">${badge}</span>
-                <span class="metric-label">${card.label}</span>
-                <span class="metric-value">${card.value !== null ? card.value.toFixed(1) + "°" : "—"}</span>
-                <span class="metric-target">${t("metric_target")}: ${arrow}${card.threshold}°</span>
-            `;
-            metrics.appendChild(div);
-        });
-
-        if (cards.length) hasContent = true;
+        if (renderAngleMetrics(data.angle_timeline)) hasContent = true;
     }
 
     const hasChart = !!(data.angle_timeline && (data.angle_timeline.primary || []).length > 1);

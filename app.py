@@ -62,14 +62,14 @@ AUTH_MSG = {
         "invalid": "Invalid username or password.",
     },
     "es": {
-        "need_both": "El usuario y la contrasena son obligatorios.",
-        "pw_short": "La contrasena debe tener al menos 8 caracteres.",
-        "pw_alnum": "La contrasena solo puede contener letras y numeros, sin espacios ni simbolos.",
-        "user_rules": "El usuario solo puede contener letras y numeros.",
-        "taken": "Ese nombre de usuario ya esta en uso.",
-        "created": "Cuenta creada! Ya puedes iniciar sesion.",
-        "need_login": "Por favor introduce tu usuario y contrasena.",
-        "invalid": "Usuario o contrasena incorrectos.",
+        "need_both": "El usuario y la contraseña son obligatorios.",
+        "pw_short": "La contraseña debe tener al menos 8 caracteres.",
+        "pw_alnum": "La contraseña solo puede contener letras y números, sin espacios ni símbolos.",
+        "user_rules": "El usuario solo puede contener letras y números.",
+        "taken": "Ese nombre de usuario ya está en uso.",
+        "created": "¡Cuenta creada! Ya puedes iniciar sesión.",
+        "need_login": "Por favor introduce tu usuario y contraseña.",
+        "invalid": "Usuario o contraseña incorrectos.",
     },
 }
 
@@ -187,9 +187,9 @@ def generate_fallback_feedback(result: dict, language: str = "en") -> str:
             "unknown": "Let's take another look.",
         },
         "es": {
-            "great": "Excelente trabajo! Tu tecnica se ve muy solida.",
-            "okay": "Buen esfuerzo! Vas por buen camino.",
-            "needs work": "Sigue asi! Cada repeticion es progreso.",
+            "great": "¡Excelente trabajo! Tu técnica se ve muy sólida.",
+            "okay": "¡Buen esfuerzo! Vas por buen camino.",
+            "needs work": "¡Sigue así! Cada repetición es progreso.",
             "unknown": "Vamos a intentarlo de nuevo.",
         },
     }
